@@ -1,0 +1,21 @@
+{
+  "name": "roleroom",
+  "version": "1.0.0",
+  "description": "RoleRoom — real-time role-based chat game (university final project)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": ["express", "socket.io", "sqlite", "chat"],
+  "license": "MIT",
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.0",
+    "openai": "^6.6.0",
+    "socket.io": "^4.8.1"
+  }
+}
