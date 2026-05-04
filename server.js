@@ -6,6 +6,7 @@
 const path = require('path');
 const http = require('http');
 const express = require('express');
+const cors = require('cors');
 const { Server } = require('socket.io');
 const OpenAI = require('openai');
 
@@ -34,11 +35,10 @@ const openai = process.env.OPENAI_API_KEY
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: false },
+  cors: { origin: '*' },
 });
 
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
+app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/avatars', express.static(path.join(__dirname, 'Avatars/Avatar')));
