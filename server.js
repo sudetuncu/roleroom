@@ -24,6 +24,12 @@ const ROLE_KEYWORDS = {
 };
 
 const ROUND_MS = 2 * 60 * 1000; // 2 minutes per round (requirement #9)
+/** Max public chat messages per round (whispers excluded). Reaching this ends the round like the timer. */
+const ROUND_MESSAGE_LIMIT = (() => {
+  const n = parseInt(process.env.ROUND_MESSAGE_LIMIT || '40', 10);
+  if (!Number.isFinite(n)) return 40;
+  return Math.min(200, Math.max(5, n));
+})();
 const WINNER_BONUS = 10;
 const AI_SCORE_MIN = 1;
 const AI_SCORE_MAX = 10;
@@ -40,10 +46,19 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.use(express.static(path.join(__dirname, 'client/dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/avatars', express.static(path.join(__dirname, 'Avatars/Avatar')));
 
+// Use indexRoutes for API
 app.use('/', indexRoutes);
+
+// Catch-all route to serve React app for non-API requests
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client/dist', 'index.html'));
+});
 
 db.init();
 
@@ -57,6 +72,42 @@ let currentScenario = '';
 let currentRoundRoles = [...db.ROLES];
 let roundMessages = [];
 let roundLifecycleRunning = false;
+
+/** Dynamic Events */
+let dynamicEventActive = false;
+let dynamicEventText = '';
+let dynamicEventEndsAt = 0;
+const DYNAMIC_EVENT_DURATION_MS = 30_000;
+const DYNAMIC_EVENT_CHANCE = 0.25; // 25% chance per 15s tick
+
+/** Secret Quests — map of username -> { quest, completed } */
+let secretQuests = new Map();
+const SECRET_QUEST_POOL = {
+  Detective: [
+    'Accuse someone of being suspicious in chat',
+    'Mention a "clue" you found near the door',
+    'Ask two different players where they were last night',
+  ],
+  Doctor: [
+    'Offer to heal someone by name',
+    'Mention a rare disease or ailment',
+    'Warn everyone about a health hazard',
+  ],
+  Killer: [
+    'Subtly threaten another player without being obvious',
+    'Mention something about shadows or darkness',
+    'Try to turn two players against each other',
+  ],
+  Spy: [
+    'Claim to have overheard a secret conversation',
+    'Send a mysterious coded message',
+    'Pretend to be a different role for at least one message',
+  ],
+};
+
+/** Voting state */
+let votingActive = false;
+let votes = new Map(); // voter -> targetUsername
 
 function secondsLeftInRound() {
   return Math.max(0, Math.ceil((roundEndsAt - Date.now()) / 1000));
@@ -170,6 +221,84 @@ function assignRolesForCurrentRound() {
   }
 }
 
+/** Assign a secret quest to each active player */
+function assignSecretQuests() {
+  secretQuests.clear();
+  const users = db.getActiveUsersOrderedByScore();
+  for (const u of users) {
+    const pool = SECRET_QUEST_POOL[u.role] || SECRET_QUEST_POOL.Spy;
+    const quest = pool[Math.floor(Math.random() * pool.length)];
+    secretQuests.set(u.username, { quest, completed: false });
+  }
+}
+
+/** Fallback dynamic events (used when no AI) */
+const FALLBACK_EVENTS = [
+  '🌪️ A sudden storm shakes the building! The lights flicker and go out for a moment...',
+  '🚪 A mysterious stranger appears at the door with a sealed letter!',
+  '💀 A scream echoes from the basement! Someone must investigate...',
+  '🔔 The town bell rings unexpectedly — is it a warning or a trap?',
+  '🗝️ A hidden compartment opens in the wall, revealing an old key!',
+  '🌙 An eclipse darkens the sky — strange things happen in the dark...',
+  '📜 A cryptic note is found pinned to the wall: "Trust no one."',
+];
+
+async function generateDynamicEvent() {
+  if (!openai) {
+    return FALLBACK_EVENTS[Math.floor(Math.random() * FALLBACK_EVENTS.length)];
+  }
+  try {
+    const completion = await openai.chat.completions.create({
+      model: AI_MODEL,
+      temperature: 0.9,
+      messages: [
+        { role: 'system', content: 'You are a dramatic game narrator. Generate a single short dramatic event (1-2 sentences) that just happened in the game world. Use an emoji at the start. Be creative and surprising.' },
+        { role: 'user', content: `Current scenario: ${currentScenario}. Generate a sudden dramatic event that changes the situation.` },
+      ],
+    });
+    return normalizeScenario(completion.choices?.[0]?.message?.content) || FALLBACK_EVENTS[0];
+  } catch {
+    return FALLBACK_EVENTS[Math.floor(Math.random() * FALLBACK_EVENTS.length)];
+  }
+}
+
+/** Try to trigger a dynamic event */
+async function maybeTriggerDynamicEvent() {
+  if (dynamicEventActive || io.engine.clientsCount === 0) return;
+  if (Math.random() > DYNAMIC_EVENT_CHANCE) return;
+  
+  dynamicEventActive = true;
+  dynamicEventText = await generateDynamicEvent();
+  dynamicEventEndsAt = Date.now() + DYNAMIC_EVENT_DURATION_MS;
+  
+  io.emit('dynamic_event', { 
+    event: dynamicEventText, 
+    durationSeconds: DYNAMIC_EVENT_DURATION_MS / 1000 
+  });
+  io.emit('chat', {
+    username: 'Narrator',
+    role: 'System',
+    message: `⚡ EVENT: ${dynamicEventText}`,
+    pointsDelta: 0,
+  });
+}
+
+/** Resolve voting results */
+function resolveVotes() {
+  if (votes.size === 0) return null;
+  const tally = new Map();
+  for (const target of votes.values()) {
+    tally.set(target, (tally.get(target) || 0) + 1);
+  }
+  let maxVotes = 0, eliminated = '';
+  for (const [name, count] of tally) {
+    if (count > maxVotes) { maxVotes = count; eliminated = name; }
+  }
+  votes.clear();
+  votingActive = false;
+  return { eliminated, voteCount: maxVotes, tally: Object.fromEntries(tally) };
+}
+
 async function evaluateRoundWithAI() {
   const users = db.getActiveUsersOrderedByScore();
   if (users.length === 0) return null;
@@ -180,10 +309,12 @@ async function evaluateRoundWithAI() {
     : 'No roleplay messages were sent in this round.';
 
   if (!openai) {
+    console.warn('RoleRoom: OPENAI_API_KEY not set — round winner picked from current scoreboard.');
     const fallbackWinner = users[0].username;
     return {
       winner: fallbackWinner,
-      reason: 'OpenAI API key is not set. Winner selected by current score.',
+      reason:
+        'This round was decided from the live scoreboard (highest score). Connect an AI narrator later for story-based judging.',
       scores: users.map((u) => ({ username: u.username, score: 5 })),
     };
   }
@@ -251,7 +382,8 @@ Return ONLY valid JSON in this exact format:
     console.error('Round evaluation failed:', err?.message || err);
     return {
       winner: users[0].username,
-      reason: 'AI evaluation failed, so winner selected by current score ranking.',
+      reason:
+        'Automated judging was unavailable this round, so the winner was taken from the current scoreboard.',
       scores: users.map((u) => ({ username: u.username, score: 5 })),
     };
   }
@@ -266,11 +398,32 @@ function applyRoundEvaluation(result) {
     const user = byUsername.get(item.username);
     if (!user) continue;
     db.addScore(user.id, clampScore(item.score));
+    // Award XP based on AI score
+    db.addXP(item.username, clampScore(item.score) * 5);
   }
 
   const winner = byUsername.get(result.winner);
   if (winner) {
     db.addScore(winner.id, WINNER_BONUS);
+    db.addXP(result.winner, 50); // Bonus XP for winning
+    db.recordGameWin(result.winner);
+  }
+
+  // Record game played and update best scores for all
+  for (const u of users) {
+    db.recordGamePlayed(u.username);
+    db.updateBestScore(u.username, u.score);
+  }
+
+  // Award quest completion bonus
+  for (const [uname, q] of secretQuests) {
+    if (q.completed) {
+      const user = byUsername.get(uname);
+      if (user) {
+        db.addScore(user.id, 15);
+        db.addXP(uname, 30);
+      }
+    }
   }
 }
 
@@ -278,8 +431,13 @@ async function startRound() {
   currentScenario = await generateScenarioFromAI();
   currentRoundRoles = [...db.ROLES];
   assignRolesForCurrentRound();
+  assignSecretQuests();
   roundMessages = [];
   roundEndsAt = Date.now() + ROUND_MS;
+  dynamicEventActive = false;
+  dynamicEventText = '';
+  votingActive = false;
+  votes.clear();
 
   io.emit('narrator_scenario', {
     scenario: currentScenario,
@@ -292,6 +450,15 @@ async function startRound() {
     message: currentScenario,
     pointsDelta: 0,
   });
+
+  // Send secret quests to each player
+  for (const sock of io.sockets.sockets.values()) {
+    const me = db.getUserBySocket(sock.id);
+    if (me && secretQuests.has(me.username)) {
+      sock.emit('secret_quest', { quest: secretQuests.get(me.username).quest });
+    }
+  }
+
   broadcastState();
 }
 
@@ -299,6 +466,25 @@ async function finishRoundAndStartNext() {
   if (roundLifecycleRunning) return;
   roundLifecycleRunning = true;
   try {
+    // Start voting phase
+    votingActive = true;
+    io.emit('voting_start', { durationSeconds: 15 });
+    io.emit('chat', { username: 'Narrator', role: 'System', message: '⚖️ VOTING TIME! You have 15 seconds to vote for who you think is the Killer or Spy!', pointsDelta: 0 });
+    
+    // Wait 15 seconds for votes
+    await new Promise(r => setTimeout(r, 15000));
+    
+    // Resolve votes
+    const voteResult = resolveVotes();
+    if (voteResult) {
+      io.emit('voting_result', voteResult);
+      io.emit('chat', { username: 'Narrator', role: 'System', message: `⚖️ The village voted! ${voteResult.eliminated} received ${voteResult.voteCount} vote(s).`, pointsDelta: 0 });
+      // Penalize voted player
+      const users = db.getActiveUsersOrderedByScore();
+      const votedUser = users.find(u => u.username === voteResult.eliminated);
+      if (votedUser) db.addScore(votedUser.id, -10);
+    }
+
     const result = await evaluateRoundWithAI();
     applyRoundEvaluation(result);
     io.emit('round_result', {
@@ -320,15 +506,25 @@ async function finishRoundAndStartNext() {
   }
 }
 
+/** Strip other players' roles for a given viewer (hidden-role UX). */
+function usersPayloadForViewer(usersFull, viewerUsername) {
+  if (!viewerUsername) return usersFull;
+  return usersFull.map((u) =>
+    u.username === viewerUsername ? u : { ...u, role: null }
+  );
+}
+
 /**
  * Emit refreshed leaderboard + optional per-socket "your role" hint.
- * Each socket gets `state` with full list and their own role line.
  */
 function broadcastState() {
-  const users = buildUsersPayload();
-  const topSocketId = users[0]?.socketId || null;
+  const usersFull = buildUsersPayload();
+  const topSocketId = usersFull[0]?.socketId || null;
   for (const sock of io.sockets.sockets.values()) {
     const me = db.getUserBySocket(sock.id);
+    const users = usersPayloadForViewer(usersFull, me?.username || null);
+    const myQuest = me ? secretQuests.get(me.username) : null;
+    const myStats = me ? db.getPlayerStats(me.username) : null;
     sock.emit('state', {
       users,
       topSocketId,
@@ -338,9 +534,27 @@ function broadcastState() {
       roundSecondsLeft: secondsLeftInRound(),
       roundCurrent: roundNumber,
       roundTotal: ROUND_TOTAL,
+      roundMessageCount: roundMessages.length,
+      roundMessageLimit: ROUND_MESSAGE_LIMIT,
+      dynamicEvent: dynamicEventActive ? dynamicEventText : null,
+      secretQuest: myQuest ? myQuest.quest : null,
+      questCompleted: myQuest ? myQuest.completed : false,
+      votingActive,
+      myStats: myStats ? { level: myStats.level, totalXP: myStats.total_xp, gamesPlayed: myStats.games_played, gamesWon: myStats.games_won } : null,
     });
   }
 }
+
+// Dynamic event timer — check every 15 seconds
+setInterval(() => {
+  if (io.engine.clientsCount === 0) return;
+  if (dynamicEventActive && Date.now() >= dynamicEventEndsAt) {
+    dynamicEventActive = false;
+    dynamicEventText = '';
+    io.emit('dynamic_event_end');
+  }
+  maybeTriggerDynamicEvent().catch(console.error);
+}, 15000);
 
 // Timer tick: broadcast state and move to next round when time ends.
 setInterval(() => {
@@ -387,10 +601,26 @@ io.on('connection', (socket) => {
     }
 
     const role = currentRoundRoles[Math.floor(Math.random() * currentRoundRoles.length)] || db.randomRole();
-    try {
-      db.createUser(username, role, socket.id, avatar);
-    } catch (e) {
-      db.disconnectUserBySocket(socket.id);
+
+    // One logical player per username: close other tabs, merge duplicate DB rows
+    const oldSocketIds = db.getActiveSocketIdsByUsername(username);
+    for (const sid of oldSocketIds) {
+      if (!sid || sid === socket.id) continue;
+      const oldSock = io.sockets.sockets.get(sid);
+      if (oldSock) {
+        oldSock.emit(
+          'error_msg',
+          'The same username joined from another window — this session was closed.'
+        );
+        oldSock.disconnect(true);
+      }
+    }
+    db.clearAllSocketsForUsername(username);
+    db.consolidateUsersByUsername(username);
+    const row = db.getUserRowByUsername(username);
+    if (row) {
+      db.attachSocketToUser(row.id, socket.id, avatar, row.role);
+    } else {
       try {
         db.createUser(username, role, socket.id, avatar);
       } catch (err) {
@@ -418,7 +648,6 @@ io.on('connection', (socket) => {
     for (const row of history) {
       socket.emit('chat', {
         username: row.username,
-        role: row.role,
         message: row.message,
         pointsDelta: row.points_delta,
       });
@@ -431,10 +660,35 @@ io.on('connection', (socket) => {
       socket.emit('error_msg', 'Join the room first.');
       return;
     }
-    const message = String(payload?.message || '')
-      .trim()
-      .slice(0, 500);
+    let message = String(payload?.message || '').trim().slice(0, 500);
     if (!message) return;
+
+    // Check for whisper command: /w username message
+    const whisperMatch = message.match(/^\/w\s+(\S+)\s+(.+)/i);
+    if (whisperMatch) {
+      const targetName = whisperMatch[1];
+      const whisperMsg = whisperMatch[2];
+      const users = db.getActiveUsersOrderedByScore();
+      const target = users.find(u => u.username.toLowerCase() === targetName.toLowerCase());
+      if (!target) {
+        socket.emit('error_msg', `Player "${targetName}" not found.`);
+        return;
+      }
+      // Sender sees own role; recipient does not (hidden-role)
+      const whisperBase = {
+        username: me.username,
+        message: whisperMsg,
+        isWhisper: true,
+        whisperTo: target.username,
+      };
+      socket.emit('whisper', { ...whisperBase, role: me.role });
+      const targetSocket = [...io.sockets.sockets.values()].find(s => {
+        const u = db.getUserBySocket(s.id);
+        return u && u.username === target.username;
+      });
+      if (targetSocket) targetSocket.emit('whisper', { ...whisperBase, role: null });
+      return;
+    }
 
     const delta = pointsForMessage(me.role, message);
     const newScore = me.score + delta;
@@ -442,13 +696,57 @@ io.on('connection', (socket) => {
     db.saveMessage(me.username, me.role, message, delta);
     roundMessages.push({ username: me.username, role: me.role, message });
 
+    // Award small XP for chatting
+    db.addXP(me.username, delta > 0 ? 5 : 1);
+
     io.emit('chat', {
       username: me.username,
-      role: me.role,
       message,
       pointsDelta: delta,
+      avatar: me.avatar || '',
     });
     broadcastState();
+
+    if (roundMessages.length >= ROUND_MESSAGE_LIMIT && !roundLifecycleRunning) {
+      roundEndsAt = Date.now();
+      io.emit('chat', {
+        username: 'Narrator',
+        role: 'System',
+        message: `Message limit for this round reached (${ROUND_MESSAGE_LIMIT}). The round is ending!`,
+        pointsDelta: 0,
+      });
+      finishRoundAndStartNext().catch((err) => {
+        console.error('Round lifecycle error (message cap):', err?.message || err);
+      });
+    }
+  });
+
+  /** Vote for a player */
+  socket.on('vote', (payload) => {
+    if (!votingActive) return;
+    const me = db.getUserBySocket(socket.id);
+    if (!me) return;
+    const target = String(payload?.target || '').trim();
+    if (!target || target === me.username) return;
+    votes.set(me.username, target);
+    socket.emit('vote_confirmed', { target });
+  });
+
+  /** Mark quest as completed */
+  socket.on('quest_complete', () => {
+    const me = db.getUserBySocket(socket.id);
+    if (!me) return;
+    const quest = secretQuests.get(me.username);
+    if (quest && !quest.completed) {
+      quest.completed = true;
+      socket.emit('quest_completed', { bonus: 15 });
+    }
+  });
+
+  /** Get global leaderboard */
+  socket.on('get_leaderboard', () => {
+    const leaderboard = db.getGlobalLeaderboard(20);
+    socket.emit('global_leaderboard', { leaderboard });
   });
 
   /** Reassign random roles and reset scores for everyone still connected. */
@@ -474,6 +772,11 @@ io.on('connection', (socket) => {
     db.disconnectUserBySocket(socket.id);
     broadcastState();
   });
+});
+
+// API: Global leaderboard
+app.get('/api/leaderboard', (req, res) => {
+  res.json(db.getGlobalLeaderboard(20));
 });
 
 server.listen(PORT, () => {

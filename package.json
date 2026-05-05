@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build": "npm run build --prefix client",
+    "reset-db": "node scripts/reset-db.js"
   },
   "engines": {
     "node": ">=22.5.0"
@@ -19,6 +21,7 @@
   "license": "MIT",
   "dependencies": {
     "cors": "^2.8.6",
+    "ejs": "^5.0.2",
     "express": "^4.21.0",
     "openai": "^6.6.0",
     "socket.io": "^4.8.1"

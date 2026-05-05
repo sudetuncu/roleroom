@@ -1,20 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+function FeatureRow({ icon, title, desc }) {
+  return (
+    <div className="flex items-center gap-4 p-3 rounded-xl bg-white/[0.02] border border-white/[0.04] mb-2.5 hover:bg-white/[0.04] transition-colors">
+      <div className="w-10 h-10 rounded-xl bg-[#231b32] border border-[#3d2e52] flex items-center justify-center text-xl shrink-0 shadow-inner">
+        {icon}
+      </div>
+      <div>
+        <h4 className="text-[#e2d4b7] font-semibold text-sm">{title}</h4>
+        <p className="text-[#9ca3af] text-[10px] mt-0.5 leading-relaxed">{desc}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function JoinScreen() {
   const [avatars, setAvatars] = useState([]);
   const [selectedAvatar, setSelectedAvatar] = useState('');
   const [username, setUsername] = useState('');
+  const [roomCode, setRoomCode] = useState('');
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     document.body.className = 'rr-page';
-    fetch('http://localhost:3000/api/avatars')
+    document.body.style.removeProperty('--rr-custom-bg-image');
+    document.body.style.removeProperty('background-image');
+    
+    fetch('/api/avatars')
       .then(res => res.json())
       .then(data => {
-        setAvatars(data);
-        if (data.length > 0) setSelectedAvatar(data[0]);
+        const avatarList = Array.isArray(data) ? data : [];
+        setAvatars(avatarList);
+        if (avatarList.length > 0) setSelectedAvatar(avatarList[0]);
       })
       .catch(err => console.error('Error fetching avatars:', err));
   }, []);
@@ -22,109 +41,133 @@ export default function JoinScreen() {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!username.trim() || username.length > 32) {
-      setError('Please enter a valid username (max 32 characters).');
+      setError('Please enter a valid username.');
       return;
     }
-    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}`);
+    
+    // Pass roomCode to the chat if provided, otherwise it's just a general room
+    const roomParam = roomCode.trim() ? `&room=${encodeURIComponent(roomCode.trim())}` : '';
+    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}${roomParam}`);
+  };
+
+  const handleCreateRoom = () => {
+    if (!username.trim() || username.length > 32) {
+      setError('Please enter a valid username before creating a room.');
+      return;
+    }
+    // Generate a random 6-character room code
+    const newRoomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}&room=${newRoomCode}`);
   };
 
   return (
-    <div className="min-h-screen font-sans text-slate-100 flex items-center justify-center p-4 sm:p-6 relative">
-      <div className="relative w-full max-w-5xl p-7 rounded-2xl bg-gradient-to-br from-[#201234f0] via-[#0c0618f5] to-[#120a24f2] border border-[#ba8cff6b] backdrop-blur-[22px] shadow-[0_0_0_1px_rgba(99,60,180,0.35),0_0_80px_rgba(124,58,237,0.28),0_20px_56px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.07)] z-10">
-        <span className="absolute w-6 h-6 border-[#c0a0ff8c] top-3 left-3 border-t-2 border-l-2 rounded-tl-md pointer-events-none z-10"></span>
-        <span className="absolute w-6 h-6 border-[#c0a0ff8c] top-3 right-3 border-t-2 border-r-2 rounded-tr-md pointer-events-none z-10"></span>
-        <span className="absolute w-6 h-6 border-[#c0a0ff8c] bottom-3 left-3 border-b-2 border-l-2 rounded-bl-md pointer-events-none z-10"></span>
-        <span className="absolute w-6 h-6 border-[#c0a0ff8c] bottom-3 right-3 border-b-2 border-r-2 rounded-br-md pointer-events-none z-10"></span>
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-purple-300/50 to-transparent z-[4]"></div>
-
-        <div className="relative z-10">
-          <p className="font-cinzel text-[0.62rem] font-semibold tracking-[0.35em] uppercase text-center mb-3 bg-gradient-to-r from-[#a08040] via-[#f0d78c] to-[#a08040] bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(212,175,55,0.35)]">
-            <span className="text-[#d4af78d9] text-[0.45rem]">◆</span> ENTER THE REALM <span className="text-[#d4af78d9] text-[0.45rem]">◆</span>
-          </p>
-
-          <div className="flex flex-col items-center mb-1">
-            <div className="relative w-[5.5rem] h-[5.5rem] rounded-full flex items-center justify-center bg-[radial-gradient(circle_at_50%_40%,rgba(180,120,255,0.35)_0%,transparent_55%),radial-gradient(circle_at_50%_100%,rgba(20,8,40,0.95),rgba(6,2,14,1))] border-2 border-[#a878ff8c] shadow-[0_0_0_1px_rgba(251,191,36,0.2),0_0_32px_rgba(139,92,246,0.55),0_0_56px_rgba(91,33,182,0.35),inset_0_0_24px_rgba(0,0,0,0.45)]">
-               <span className="text-3xl">🎭</span>
-            </div>
-          </div>
-
-          <h1 className="font-display font-black text-[clamp(1.85rem,7vw,2.45rem)] leading-none flex items-baseline justify-center flex-wrap mt-1 mb-1 tracking-wider bg-gradient-to-r from-[#d8b4fe] via-[#fef3c7] to-[#c4b5fd] bg-clip-text text-transparent drop-shadow-[0_2px_12px_rgba(124,58,237,0.45)]">
-            ROLEROOM
-          </h1>
-          <div className="font-cinzel text-[0.58rem] font-semibold tracking-[0.28em] uppercase text-[#f5f0ffe0] flex items-center justify-center gap-2 mt-1">
-            <span className="flex-1 max-w-[3rem] h-px bg-gradient-to-r from-transparent to-[#c0a0ff8c]"></span>
-            <span className="text-[#d4af78d9] text-[0.45rem]">◆</span>
-            <span>LIVE ACTION ROLEPLAY</span>
-            <span className="text-[#d4af78d9] text-[0.45rem]">◆</span>
-            <span className="flex-1 max-w-[3rem] h-px bg-gradient-to-l from-transparent to-[#c0a0ff8c]"></span>
-          </div>
-
-          {error && (
-            <div className="mt-5 rounded-xl bg-red-500/15 border border-red-400/35 px-4 py-3 text-sm text-red-300">
-              ⚠️ {error}
-            </div>
-          )}
-
-          <div className="mt-7 flex flex-col md:flex-row gap-8">
-            <div className="flex-1 flex flex-col">
-              <label className="font-cinzel text-[0.65rem] font-bold tracking-[0.2em] uppercase text-[#c4b5dce6] text-center mb-3">CHOOSE YOUR AVATAR</label>
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-[320px] overflow-y-auto scr pr-2 flex-1">
-                {avatars.length > 0 ? avatars.map((avatar, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => setSelectedAvatar(avatar)}
-                    className={`rounded-xl overflow-hidden cursor-pointer border-2 transition-all ${selectedAvatar === avatar ? 'border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.5)] opacity-100' : 'border-transparent opacity-80 hover:border-purple-400/80 hover:opacity-100'}`}
-                  >
-                    <img src={`http://localhost:3000/avatars/${avatar}`} alt="Avatar" className="w-full h-auto object-cover aspect-square" />
-                  </div>
-                )) : (
-                  <div className="col-span-4 text-center text-xs text-purple-300/50 py-10">Loading avatars...</div>
-                )}
+    <div className="min-h-screen text-slate-200 font-sans relative flex items-center justify-center p-4 sm:p-6">
+      
+      {/* Main Glassmorphism Panel */}
+      <div className="w-full max-w-[800px] bg-[#120d1d]/85 backdrop-blur-xl border border-[#c8aa6e]/25 rounded-[2rem] shadow-[0_0_60px_rgba(0,0,0,0.8)] flex flex-col md:flex-row overflow-hidden relative z-10">
+        
+        {/* Left Column: Branding & Features */}
+        <div className="flex-1 min-w-0 p-6 md:p-8 flex flex-col justify-between relative border-b md:border-b-0 md:border-r border-[#c8aa6e]/15">
+          
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-12 h-12 rounded-full bg-[#241b35] border border-[#c8aa6e]/40 flex items-center justify-center shadow-[0_0_20px_rgba(200,170,110,0.15)]">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M2 9L5 20H19L22 9L16 13L12 4L8 13L2 9Z" fill="#c8aa6e"/>
+                  <path d="M7 15C7 16.1046 7.89543 17 9 17C10.1046 17 11 16.1046 11 15C11 13.8954 10.1046 13 9 13C7.89543 13 7 13.8954 7 15Z" fill="#120d1d"/>
+                  <path d="M13 15C13 16.1046 13.8954 17 15 17C16.1046 17 17 16.1046 17 15C17 13.8954 16.1046 13 15 13C13.8954 13 13 13.8954 13 15Z" fill="#120d1d"/>
+                </svg>
+              </div>
+              <div>
+                <h1 className="font-cinzel text-3xl font-bold text-[#f4ecd8] tracking-wide">RoleRoom</h1>
+                <h2 className="text-[#a397b4] text-xs tracking-widest uppercase mt-0.5">Live Action Roleplay</h2>
               </div>
             </div>
+            
+            <p className="text-[#d1c5e0] text-sm mt-4 mb-6 font-medium">
+              Play your role. Hide your secrets. Win the round.
+            </p>
 
-            <div className="flex-1 flex flex-col justify-center">
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="font-cinzel text-[0.65rem] font-bold tracking-[0.2em] uppercase text-[#c4b5dce6] block mb-1" htmlFor="username">ADVENTURER NAME</label>
-                  <div className="flex items-center gap-2 text-[#a88cd28c] rounded-xl bg-[#080412e0] border border-[#a078e666] px-3 py-2 shadow-[inset_0_0_20px_rgba(0,0,0,0.35),0_0_18px_rgba(124,58,237,0.12)] focus-within:border-[#c0a0ffe6] focus-within:shadow-[inset_0_0_20px_rgba(0,0,0,0.3),0_0_28px_rgba(139,92,246,0.28)] transition-all">
-                    <span className="text-xl">👤</span>
-                    <input
-                      id="username"
-                      value={username}
-                      onChange={e => setUsername(e.target.value)}
-                      type="text"
-                      maxLength="32"
-                      autoComplete="off"
-                      required
-                      placeholder="Enter your name..."
-                      className="flex-1 min-w-0 bg-transparent border-none outline-none text-[#f1edfa] text-sm py-1 placeholder-[#948caa]"
-                    />
-                  </div>
-                </div>
-                <button type="submit" className="w-full mt-1 rounded-full py-3 px-6 font-cinzel font-bold text-[0.68rem] tracking-[0.22em] uppercase relative shadow-[0_0_0_1px_rgba(212,175,55,0.45),0_0_24px_rgba(124,58,237,0.25),0_6px_20px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.08)] bg-gradient-to-b from-[#453070] via-[#2a1848] to-[#160c28] border-2 border-[#c9a44a] text-[#f8ecc8] text-shadow-[0_0_20px_rgba(212,175,55,0.35)] flex items-center justify-center gap-2 cursor-pointer hover:brightness-110 hover:shadow-[0_0_0_1px_rgba(255,230,160,0.55),0_0_36px_rgba(139,92,246,0.35),0_8px_28px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.1)] hover:-translate-y-0.5 active:translate-y-0 transition-all">
-                  <span>⚔️ ENTER THE REALM</span>
+            <div className="flex flex-col">
+              <FeatureRow icon="🎲" title="Random Roles" desc="Get assigned as Detective, Doctor, Killer, or Spy." />
+              <FeatureRow icon="🔑" title="Secret Keywords" desc="Use your hidden words in chat to earn bonus points." />
+              <FeatureRow icon="🤖" title="AI Narrator" desc="An intelligent game master evaluates your roleplay." />
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right Column: Join Form */}
+        <div className="flex-1 min-w-0 p-6 md:p-8 flex flex-col bg-[#0d0914]/40">
+          
+          <div className="flex items-center justify-center gap-3 mb-6">
+            <span className="text-[#c8aa6e]/60 text-lg">✧</span>
+            <h3 className="font-cinzel text-xl font-bold text-[#f4ecd8]">Enter the Room</h3>
+            <span className="text-[#c8aa6e]/60 text-lg">✧</span>
+          </div>
+
+          {/* Avatar Selection */}
+          <div className="mb-5">
+            <label className="block text-[11px] font-medium text-[#a397b4] mb-2.5">Choose an Avatar</label>
+            <div className="flex gap-2.5 overflow-x-auto pb-2 scr">
+              {avatars.length > 0 ? avatars.map((av, i) => (
+                <button key={i} type="button" onClick={() => setSelectedAvatar(av)}
+                  className={`relative w-[3.5rem] h-[3.5rem] shrink-0 rounded-2xl overflow-hidden border-[1.5px] transition-all duration-200 ${selectedAvatar === av ? 'border-[#9b7bcf] shadow-[0_0_15px_rgba(155,123,207,0.4)] scale-105' : 'border-[#3a2d4a] opacity-70 hover:opacity-100 hover:border-[#5c4a73] bg-[#151020]'}`}>
+                  <img src={`/avatars/${av}`} className="w-full h-full object-cover" alt="avatar" />
+                  {selectedAvatar === av && (
+                    <div className="absolute top-1 right-1 w-3.5 h-3.5 bg-[#9b7bcf] rounded-full flex items-center justify-center shadow-md">
+                      <span className="text-[8px] text-white font-bold leading-none">✓</span>
+                    </div>
+                  )}
                 </button>
-              </form>
-
-              <div className="flex flex-wrap justify-center gap-2 mt-5">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[0.58rem] font-semibold tracking-[0.06em] uppercase font-cinzel bg-[#080412bf] border border-[#60a5fa8c] text-[#93c5fd]">🔍 Detective</span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[0.58rem] font-semibold tracking-[0.06em] uppercase font-cinzel bg-[#080412bf] border border-[#4ade8080] text-[#86efac]">💊 Doctor</span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[0.58rem] font-semibold tracking-[0.06em] uppercase font-cinzel bg-[#080412bf] border border-[#f871718c] text-[#fca5a5]">🗡️ Killer</span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[0.58rem] font-semibold tracking-[0.06em] uppercase font-cinzel bg-[#080412bf] border border-[#c084fc8c] text-[#e9d5ff]">🎭 Spy</span>
-              </div>
-
-              <div className="mt-6 p-4 rounded-xl bg-[#08041299] border border-purple-400/20 shadow-inner">
-                <h3 className="text-[10px] font-bold tracking-widest text-amber-200/90 uppercase mb-2">How to Play</h3>
-                <ul className="text-[11px] text-slate-300/90 space-y-1.5 list-disc pl-4">
-                  <li>A random role is assigned to you upon joining.</li>
-                  <li>Each role has secret keywords. Use them in your messages for <span className="text-emerald-400 font-bold">+10 pts</span>.</li>
-                  <li>Failing to act your role loses you <span className="text-red-400 font-bold">-5 pts</span>.</li>
-                  <li>At the end of each round, an AI Narrator will declare a winner!</li>
-                </ul>
-              </div>
+              )) : (
+                <div className="w-full text-center text-sm text-slate-500 py-4">Loading avatars...</div>
+              )}
             </div>
           </div>
+
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4 flex-1">
+            <div>
+              <label className="block text-[11px] font-medium text-[#a397b4] mb-1.5">Player Name</label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6b5a82]">👤</span>
+                <input type="text" value={username} onChange={e => setUsername(e.target.value)} required maxLength="32" placeholder="Enter your name..."
+                  className="w-full bg-[#0a0710] border border-[#2d223a] rounded-xl pl-10 pr-4 py-2.5 text-[#e2d5b5] placeholder-[#4a3b5c] focus:outline-none focus:border-[#c8aa6e]/50 focus:ring-1 focus:ring-[#c8aa6e]/30 transition-all text-sm" />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-[#a397b4] mb-1.5">Room Code (Optional)</label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6b5a82]">#</span>
+                <input type="text" value={roomCode} onChange={e => setRoomCode(e.target.value)} placeholder="Enter room code..."
+                  className="w-full bg-[#0a0710] border border-[#2d223a] rounded-xl pl-10 pr-4 py-2.5 text-[#e2d5b5] placeholder-[#4a3b5c] focus:outline-none focus:border-[#c8aa6e]/50 focus:ring-1 focus:ring-[#c8aa6e]/30 transition-all text-sm" />
+              </div>
+            </div>
+
+            {error && <div className="text-red-400 text-xs font-medium bg-red-500/10 p-2 rounded-lg border border-red-500/20 text-center">{error}</div>}
+
+            <div className="flex flex-col gap-2.5 mt-auto pt-3">
+              <button type="submit" className="w-full bg-gradient-to-r from-[#7a5b9b] to-[#5b407a] hover:from-[#8b6cac] hover:to-[#6c4f8a] text-[#f4ecd8] font-medium py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(122,91,155,0.3)] flex items-center justify-center gap-2 border border-[#9b7bcf]/30">
+                Join Game <span className="text-lg leading-none">→</span>
+              </button>
+              <button type="button" onClick={handleCreateRoom} className="w-full bg-[#120d1d] hover:bg-[#1a1329] border border-[#2d223a] text-[#a397b4] hover:text-[#e2d5b5] font-medium py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                👥 Create Room
+              </button>
+            </div>
+          </form>
+
+          {/* Role Chips */}
+          <div className="mt-5 pt-4 border-t border-[#c8aa6e]/15">
+            <p className="text-[9px] text-center text-[#8b7a9e] uppercase tracking-widest mb-2.5 font-semibold">Available Roles</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <span className="px-2.5 py-1 rounded-lg bg-[#0a0710] border border-[#3b82f6]/30 text-[#60a5fa] text-[10px] font-medium flex items-center gap-1.5"><span className="text-sm">🔍</span> Detective</span>
+              <span className="px-2.5 py-1 rounded-lg bg-[#0a0710] border border-[#22c55e]/30 text-[#4ade80] text-[10px] font-medium flex items-center gap-1.5"><span className="text-sm">✚</span> Doctor</span>
+              <span className="px-2.5 py-1 rounded-lg bg-[#0a0710] border border-[#ef4444]/30 text-[#f87171] text-[10px] font-medium flex items-center gap-1.5"><span className="text-sm">🗡️</span> Killer</span>
+              <span className="px-2.5 py-1 rounded-lg bg-[#0a0710] border border-[#a855f7]/30 text-[#c084fc] text-[10px] font-medium flex items-center gap-1.5"><span className="text-sm">🎭</span> Spy</span>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
