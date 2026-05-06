@@ -28,14 +28,30 @@ export default function JoinScreen() {
     document.body.style.removeProperty('--rr-custom-bg-image');
     document.body.style.removeProperty('background-image');
     
+    const fallbackAvatars = [
+      "Başlıksız786_20260430191709.png", "Başlıksız787_20260430191651.png", "Başlıksız788_20260430191805.png",
+      "Başlıksız788_20260430191820.png", "Başlıksız788_20260430191836.png", "Başlıksız788_20260430191852.png",
+      "Başlıksız788_20260430191907.png", "Başlıksız788_20260430191923.png", "Başlıksız788_20260501205830.png",
+      "Başlıksız788_20260501205853.png", "Başlıksız788_20260501205912.png", "Başlıksız788_20260501205927.png",
+      "Başlıksız788_20260501205944.png", "Başlıksız788_20260501210433.png", "Başlıksız789_20260430191630.png",
+      "Başlıksız790_20260430191612.png"
+    ];
+
     fetch('/api/avatars')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error('API failed');
+        return res.json();
+      })
       .then(data => {
-        const avatarList = Array.isArray(data) ? data : [];
+        const avatarList = Array.isArray(data) ? data : fallbackAvatars;
         setAvatars(avatarList);
         if (avatarList.length > 0) setSelectedAvatar(avatarList[0]);
       })
-      .catch(err => console.error('Error fetching avatars:', err));
+      .catch(err => {
+        console.error('Error fetching avatars, using fallback:', err);
+        setAvatars(fallbackAvatars);
+        setSelectedAvatar(fallbackAvatars[0]);
+      });
   }, []);
 
   const handleSubmit = (e) => {

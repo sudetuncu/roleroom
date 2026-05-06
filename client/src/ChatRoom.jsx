@@ -118,12 +118,25 @@ export default function ChatRoom() {
 
   useEffect(() => {
     let mounted = true;
+    const fallbackAssets = {
+      narratorAvatars: [{ proxyUrl: '/images/narrator.png' }],
+      backgrounds: [
+        { proxyUrl: '/images/roleroom-bg-4x3.png' },
+        { proxyUrl: '/images/roleroom-bg-4x3.png' },
+        { proxyUrl: '/images/roleroom-bg-4x3.png' },
+        { proxyUrl: '/images/roleroom-bg-4x3.png' }
+      ]
+    };
+
     fetch('/api/assets')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error('API failed');
+        return res.json();
+      })
       .then((data) => {
         if (!mounted) return;
-        const narratorList = Array.isArray(data?.narratorAvatars) ? data.narratorAvatars : [];
-        const bgList = Array.isArray(data?.backgrounds) ? data.backgrounds : [];
+        const narratorList = Array.isArray(data?.narratorAvatars) && data.narratorAvatars.length > 0 ? data.narratorAvatars : fallbackAssets.narratorAvatars;
+        const bgList = Array.isArray(data?.backgrounds) && data.backgrounds.length > 0 ? data.backgrounds : fallbackAssets.backgrounds;
         setBackgroundAssets(bgList);
         if (narratorList.length > 0) {
           const pick = narratorList[Math.floor(Math.random() * narratorList.length)];
@@ -131,7 +144,10 @@ export default function ChatRoom() {
         }
       })
       .catch((err) => {
-        console.error('Error loading external assets:', err);
+        if (!mounted) return;
+        console.error('Error loading external assets, using fallback:', err);
+        setBackgroundAssets(fallbackAssets.backgrounds);
+        setNarratorAvatar(fallbackAssets.narratorAvatars[0].proxyUrl);
       });
     return () => {
       mounted = false;
