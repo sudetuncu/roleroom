@@ -37,6 +37,7 @@ export default function ChatRoom() {
   const [questNotif, setQuestNotif] = useState(null);
   const [narratorAvatar, setNarratorAvatar] = useState('/images/narrator.png');
   const [backgroundAssets, setBackgroundAssets] = useState([]);
+  const [isBgLoaded, setIsBgLoaded] = useState(false);
   const messagesEndRef = useRef(null);
 
   const queryParams = new URLSearchParams(location.search);
@@ -165,8 +166,10 @@ export default function ChatRoom() {
   }, [gameState.myRole]);
 
   useEffect(() => {
-    if (!Array.isArray(backgroundAssets) || backgroundAssets.length === 0) return;
-    const roleKey = String(gameState.myRole || '').toLowerCase();
+    // If assets or role are not ready, don't do anything yet
+    if (!Array.isArray(backgroundAssets) || backgroundAssets.length === 0 || !gameState.myRole || gameState.myRole === '—') return;
+
+    const roleKey = String(gameState.myRole).toLowerCase();
     const roleIndexes = {
       detective: 0,
       doctor: 1,
@@ -174,12 +177,33 @@ export default function ChatRoom() {
       spy: 3,
     };
     const rawIndex = roleIndexes[roleKey];
-    if (rawIndex === undefined) return;
+    if (rawIndex === undefined) {
+      setIsBgLoaded(true); // Fallback
+      return;
+    }
     const selected = backgroundAssets[rawIndex % backgroundAssets.length];
     if (selected?.proxyUrl) {
-      document.body.style.setProperty('--rr-custom-bg-image', `url("${selected.proxyUrl}")`);
+      const img = new Image();
+      img.src = selected.proxyUrl;
+      img.onload = () => {
+        document.body.style.setProperty('--rr-custom-bg-image', `url("${selected.proxyUrl}")`);
+        setIsBgLoaded(true);
+      };
+      img.onerror = () => {
+        setIsBgLoaded(true);
+      };
+    } else {
+      setIsBgLoaded(true);
     }
   }, [gameState.myRole, backgroundAssets]);
+
+  // Fallback timeout in case image loading hangs or fails silently
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!isBgLoaded) setIsBgLoaded(true);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [isBgLoaded]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -212,8 +236,15 @@ export default function ChatRoom() {
   const myUser = gameState.users.find(u => u.username === username);
 
   return (
-    <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="atmosphere-layer"></div>
+    <>
+      {!isBgLoaded && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0d0618] text-purple-300">
+          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <h2 className="font-cinzel text-xl font-bold tracking-widest animate-pulse uppercase">Entering Room...</h2>
+        </div>
+      )}
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="atmosphere-layer"></div>
       
       <header className="relative z-30 shrink-0 flex items-center justify-between px-4 sm:px-5 py-3 glass-strong border-b border-purple-400/15">
         <div className="flex items-center gap-3 glass rounded-xl px-3 py-2 panel-glow max-w-[min(100%,220px)] sm:max-w-none">
@@ -573,5 +604,6 @@ export default function ChatRoom() {
         </div>
       )}
     </div>
+    </>
   );
 }
