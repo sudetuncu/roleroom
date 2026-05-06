@@ -49,7 +49,8 @@ export default function ChatRoom() {
       return;
     }
 
-    const newSocket = io('/', {
+    const apiUrl = import.meta.env.VITE_API_URL || '';
+    const newSocket = io(apiUrl || '/', {
       query: { username, avatar },
       transports: ['websocket', 'polling']
     });
@@ -128,7 +129,8 @@ export default function ChatRoom() {
       ]
     };
 
-    fetch('/api/assets')
+    const apiUrl = import.meta.env.VITE_API_URL || '';
+    fetch(`${apiUrl}/api/assets`)
       .then((res) => {
         if (!res.ok) throw new Error('API failed');
         return res.json();

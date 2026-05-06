@@ -37,7 +37,8 @@ export default function JoinScreen() {
       "Başlıksız790_20260430191612.png"
     ];
 
-    fetch('/api/avatars')
+    const apiUrl = import.meta.env.VITE_API_URL || '';
+    fetch(`${apiUrl}/api/avatars`)
       .then(res => {
         if (!res.ok) throw new Error('API failed');
         return res.json();
