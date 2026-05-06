@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build": "cd client && npm install && npx vite build",
+    "build": "echo 'build handled by render.yaml'",
     "reset-db": "node scripts/reset-db.js"
   },
   "engines": {
