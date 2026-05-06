@@ -37,13 +37,13 @@ export default function ChatRoom() {
   const [dynamicEventBanner, setDynamicEventBanner] = useState(null);
   const [questNotif, setQuestNotif] = useState(null);
   const [narratorAvatar, setNarratorAvatar] = useState('/images/narrator.png');
-  const [backgroundAssets, setBackgroundAssets] = useState([]);
   const [bgReady, setBgReady] = useState(false);
   const messagesEndRef = useRef(null);
 
   const queryParams = new URLSearchParams(location.search);
   const username = (queryParams.get('username') || '').trim();
   const avatar = (queryParams.get('avatar') || '').trim();
+  const selectedBgUrl = (queryParams.get('bg') || '').trim();
 
   useEffect(() => {
     if (!username) {
@@ -102,7 +102,7 @@ export default function ChatRoom() {
 
     newSocket.on('voting_start', (payload) => {
       setVotingModal({ durationSeconds: payload.durationSeconds });
-      setTimeout(() => setVotingModal(null), payload.durationSeconds * 1000);
+      // Remove the setTimeout here, let the server's 'voting_result' clear it
     });
     newSocket.on('voting_result', (payload) => {
       setVotingModal(null);
@@ -140,8 +140,6 @@ export default function ChatRoom() {
       .then((data) => {
         if (!mounted) return;
         const narratorList = Array.isArray(data?.narratorAvatars) && data.narratorAvatars.length > 0 ? data.narratorAvatars : fallbackAssets.narratorAvatars;
-        const bgList = Array.isArray(data?.backgrounds) && data.backgrounds.length > 0 ? data.backgrounds : fallbackAssets.backgrounds;
-        setBackgroundAssets(bgList);
         if (narratorList.length > 0) {
           const pick = narratorList[Math.floor(Math.random() * narratorList.length)];
           if (pick?.proxyUrl) setNarratorAvatar(pick.proxyUrl);
@@ -150,7 +148,6 @@ export default function ChatRoom() {
       .catch((err) => {
         if (!mounted) return;
         console.error('Error loading external assets, using fallback:', err);
-        setBackgroundAssets(fallbackAssets.backgrounds);
         setNarratorAvatar(fallbackAssets.narratorAvatars[0].proxyUrl);
       });
     return () => {
@@ -159,38 +156,21 @@ export default function ChatRoom() {
   }, []);
 
   useEffect(() => {
-    // If assets or role are not ready, don't do anything yet
-    if (!Array.isArray(backgroundAssets) || backgroundAssets.length === 0 || !gameState.myRole || gameState.myRole === '—') return;
-
-    const roleKey = String(gameState.myRole).toLowerCase();
-    const roleIndexes = {
-      detective: 0,
-      doctor: 1,
-      killer: 2,
-      spy: 3,
-    };
-    const rawIndex = roleIndexes[roleKey];
-    if (rawIndex === undefined) {
-      setBgReady(true); // Fallback
+    if (!selectedBgUrl) {
+      setBgReady(true);
       return;
     }
-    const selected = backgroundAssets[rawIndex % backgroundAssets.length];
-    if (selected?.proxyUrl) {
-      const img = new Image();
-      img.src = selected.proxyUrl;
-      img.onload = () => {
-        document.body.style.setProperty('--rr-custom-bg-image', `url("${selected.proxyUrl}")`);
-        setBgReady(true);
-      };
-      img.onerror = () => {
-        setBgReady(true);
-      };
-    } else {
+    const img = new Image();
+    img.src = selectedBgUrl;
+    img.onload = () => {
+      document.body.style.setProperty('--rr-custom-bg-image', `url("${selectedBgUrl}")`);
       setBgReady(true);
-    }
-  }, [gameState.myRole, backgroundAssets]);
+    };
+    img.onerror = () => {
+      setBgReady(true);
+    };
+  }, [selectedBgUrl]);
 
-  // Fallback timeout in case image loading hangs or fails silently
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!bgReady) setBgReady(true);
@@ -201,7 +181,7 @@ export default function ChatRoom() {
   useEffect(() => {
     if (bgReady && gameState.myRole && gameState.myRole !== '—') {
       document.body.className = `rr-page h-screen font-sans text-slate-200 overflow-hidden flex flex-col relative theme-${gameState.myRole.toLowerCase()}`;
-    } else {
+    } else if (bgReady) {
       document.body.className = `rr-page h-screen font-sans text-slate-200 overflow-hidden flex flex-col relative`;
     }
   }, [gameState.myRole, bgReady]);
