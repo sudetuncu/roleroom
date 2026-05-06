@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build": "cd client && npm install && npm run build",
+    "build": "cd client && npm install && npx vite build",
     "reset-db": "node scripts/reset-db.js"
   },
   "engines": {
