@@ -122,12 +122,17 @@ export default function ChatRoom() {
   useEffect(() => {
     let mounted = true;
     const fallbackAssets = {
-      narratorAvatars: [{ proxyUrl: '/images/narrator.png' }],
+      narratorAvatars: [
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1wQWexlLKuyNtW47-a8g_Vdj2fVmcbwHt&sz=w1200' },
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1e78erRqDtsnTDzTMiZjoAga6yVSuep_r&sz=w1200' },
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=10emOZlxGTUq0vanJ65bj7qO6tjOtGUG9&sz=w1200' },
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1hC4ltkDuUX-HtXzR4Y7-u3RbYNC_cox5&sz=w1200' }
+      ],
       backgrounds: [
-        { proxyUrl: '/images/roleroom-bg-4x3.png' },
-        { proxyUrl: '/images/roleroom-bg-4x3.png' },
-        { proxyUrl: '/images/roleroom-bg-4x3.png' },
-        { proxyUrl: '/images/roleroom-bg-4x3.png' }
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1WQcUOpfjQO2xkK2RxsbM5suzztOXCsWc&sz=w1200' },
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1ifBx51Ypdel5T8bLUblvflrlJowQRNlp&sz=w1200' },
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1ieKcFsNfxwUOIMUSmH5TkbhxWwb-gd9T&sz=w1200' },
+        { proxyUrl: 'https://drive.google.com/thumbnail?id=1et7K86swEry7zOtLYfu964bxb9_xJqPw&sz=w1200' }
       ]
     };
 

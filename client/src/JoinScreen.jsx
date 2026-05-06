@@ -45,6 +45,13 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
 
     const apiUrl = import.meta.env.VITE_API_URL || '';
 
+    const fallbackBgs = [
+      { proxyUrl: 'https://drive.google.com/thumbnail?id=1WQcUOpfjQO2xkK2RxsbM5suzztOXCsWc&sz=w1200' },
+      { proxyUrl: 'https://drive.google.com/thumbnail?id=1ifBx51Ypdel5T8bLUblvflrlJowQRNlp&sz=w1200' },
+      { proxyUrl: 'https://drive.google.com/thumbnail?id=1ieKcFsNfxwUOIMUSmH5TkbhxWwb-gd9T&sz=w1200' },
+      { proxyUrl: 'https://drive.google.com/thumbnail?id=1et7K86swEry7zOtLYfu964bxb9_xJqPw&sz=w1200' }
+    ];
+
     const cachedAvatars = sessionStorage.getItem('rr_avatars');
     if (cachedAvatars) {
       try {
@@ -83,9 +90,16 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
           sessionStorage.setItem('rr_backgrounds', JSON.stringify(bgList));
           setBackgrounds(bgList);
           if (!selectedBg) setSelectedBg(bgList[0]?.proxyUrl || '');
+        } else {
+          setBackgrounds(fallbackBgs);
+          if (!selectedBg) setSelectedBg(fallbackBgs[0]?.proxyUrl || '');
         }
       })
-      .catch(err => console.error('Error fetching assets:', err));
+      .catch(err => {
+        console.error('Error fetching assets, using fallback bgs:', err);
+        setBackgrounds(fallbackBgs);
+        if (!selectedBg) setSelectedBg(fallbackBgs[0]?.proxyUrl || '');
+      });
 
     fetch(`${apiUrl}/api/avatars`)
       .then(res => {
