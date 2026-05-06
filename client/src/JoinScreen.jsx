@@ -21,12 +21,18 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
   const [username, setUsername] = useState(initialUsername || '');
   const [roomCode, setRoomCode] = useState(initialRoomCode || '');
   const [error, setError] = useState(null);
+  const [backgrounds, setBackgrounds] = useState([]);
+  const [selectedBg, setSelectedBg] = useState('');
   const navigate = useNavigate();
 
+  const BG_NAMES = ['Classroom', 'Doodle', 'Graveyard', 'House'];
+
   useEffect(() => {
-    document.body.className = 'rr-page';
-    document.body.style.removeProperty('--rr-custom-bg-image');
-    document.body.style.removeProperty('background-image');
+    if (!isLoading) {
+      document.body.className = 'rr-page';
+      document.body.style.removeProperty('--rr-custom-bg-image');
+      document.body.style.removeProperty('background-image');
+    }
     
     const fallbackAvatars = [
       "Başlıksız786_20260430191709.png", "Başlıksız787_20260430191651.png", "Başlıksız788_20260430191805.png",
@@ -38,6 +44,49 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
     ];
 
     const apiUrl = import.meta.env.VITE_API_URL || '';
+
+    const cachedAvatars = sessionStorage.getItem('rr_avatars');
+    if (cachedAvatars) {
+      try {
+        const parsed = JSON.parse(cachedAvatars);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAvatars(parsed);
+          if (!selectedAvatar && !initialAvatar) setSelectedAvatar(parsed[0]);
+        }
+      } catch (e) {}
+    }
+
+    const cachedBgs = sessionStorage.getItem('rr_backgrounds');
+    if (cachedBgs) {
+      try {
+        const parsed = JSON.parse(cachedBgs);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setBackgrounds(parsed);
+          if (!selectedBg) setSelectedBg(parsed[0]?.proxyUrl || '');
+        }
+      } catch (e) {}
+    }
+
+    fetch(`${apiUrl}/api/assets`)
+      .then(res => res.json())
+      .then(data => {
+        const avatarList = Array.isArray(data?.avatars) ? data.avatars : [];
+        const bgList = Array.isArray(data?.backgrounds) ? data.backgrounds : [];
+        
+        if (avatarList.length > 0) {
+          sessionStorage.setItem('rr_avatars', JSON.stringify(avatarList));
+          setAvatars(avatarList);
+          if (!selectedAvatar && !initialAvatar) setSelectedAvatar(avatarList[0]);
+        }
+
+        if (bgList.length > 0) {
+          sessionStorage.setItem('rr_backgrounds', JSON.stringify(bgList));
+          setBackgrounds(bgList);
+          if (!selectedBg) setSelectedBg(bgList[0]?.proxyUrl || '');
+        }
+      })
+      .catch(err => console.error('Error fetching assets:', err));
+
     fetch(`${apiUrl}/api/avatars`)
       .then(res => {
         if (!res.ok) throw new Error('API failed');
@@ -45,13 +94,16 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
       })
       .then(data => {
         const avatarList = Array.isArray(data) ? data : fallbackAvatars;
-        setAvatars(avatarList);
-        if (avatarList.length > 0) setSelectedAvatar(avatarList[0]);
+        if (avatarList.length > 0) {
+          sessionStorage.setItem('rr_avatars', JSON.stringify(avatarList));
+          setAvatars(avatarList);
+          if (!selectedAvatar && !initialAvatar) setSelectedAvatar(avatarList[0]);
+        }
       })
       .catch(err => {
         console.error('Error fetching avatars, using fallback:', err);
         setAvatars(fallbackAvatars);
-        setSelectedAvatar(fallbackAvatars[0]);
+        if (!selectedAvatar && !initialAvatar) setSelectedAvatar(fallbackAvatars[0]);
       });
   }, []);
 
@@ -64,7 +116,8 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
     
     // Pass roomCode to the chat if provided, otherwise it's just a general room
     const roomParam = roomCode.trim() ? `&room=${encodeURIComponent(roomCode.trim())}` : '';
-    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}${roomParam}`);
+    const bgParam = selectedBg ? `&bg=${encodeURIComponent(selectedBg)}` : '';
+    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}${roomParam}${bgParam}`);
   };
 
   const handleCreateRoom = () => {
@@ -74,7 +127,8 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
     }
     // Generate a random 6-character room code
     const newRoomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}&room=${newRoomCode}`);
+    const bgParam = selectedBg ? `&bg=${encodeURIComponent(selectedBg)}` : '';
+    navigate(`/chat?username=${encodeURIComponent(username)}&avatar=${encodeURIComponent(selectedAvatar)}&room=${newRoomCode}${bgParam}`);
   };
 
   return (
@@ -124,7 +178,7 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
           </div>
 
           {/* Avatar Selection */}
-          <div className="mb-5">
+          <div className="mb-4">
             <label className="block text-[11px] font-medium text-[#a397b4] mb-2.5">Choose an Avatar</label>
             <div className="flex gap-2.5 overflow-x-auto pb-2 scr">
               {avatars.length > 0 ? avatars.map((av, i) => (
@@ -139,6 +193,30 @@ export default function JoinScreen({ isLoading, initialUsername, initialAvatar, 
                 </button>
               )) : (
                 <div className="w-full text-center text-sm text-slate-500 py-4">Loading avatars...</div>
+              )}
+            </div>
+          </div>
+
+          {/* Background Theme Selection */}
+          <div className="mb-5">
+            <label className="block text-[11px] font-medium text-[#a397b4] mb-2.5">Choose a Theme</label>
+            <div className="grid grid-cols-2 gap-2">
+              {backgrounds.length > 0 ? backgrounds.map((bg, i) => (
+                <button key={bg.id || i} type="button" onClick={() => setSelectedBg(bg.proxyUrl)}
+                  className={`relative h-16 rounded-xl overflow-hidden border-[1.5px] transition-all duration-200 group ${selectedBg === bg.proxyUrl ? 'border-[#c8aa6e] shadow-[0_0_15px_rgba(200,170,110,0.4)] scale-[1.02]' : 'border-[#3a2d4a] opacity-70 hover:opacity-100 hover:border-[#5c4a73]'}`}>
+                  <img src={bg.proxyUrl} className="w-full h-full object-cover" alt={BG_NAMES[i] || `Theme ${i + 1}`} />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
+                  <span className="absolute bottom-1.5 left-2 text-[9px] font-bold text-white/90 drop-shadow-lg">
+                    {BG_NAMES[i] || `Theme ${i + 1}`}
+                  </span>
+                  {selectedBg === bg.proxyUrl && (
+                    <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-[#c8aa6e] rounded-full flex items-center justify-center shadow-md">
+                      <span className="text-[8px] text-[#120d1d] font-bold leading-none">✓</span>
+                    </div>
+                  )}
+                </button>
+              )) : (
+                <div className="col-span-2 text-center text-sm text-slate-500 py-3">Loading themes...</div>
               )}
             </div>
           </div>
