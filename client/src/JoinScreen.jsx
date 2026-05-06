@@ -15,11 +15,11 @@ function FeatureRow({ icon, title, desc }) {
   );
 }
 
-export default function JoinScreen() {
+export default function JoinScreen({ isLoading, initialUsername, initialAvatar, initialRoomCode }) {
   const [avatars, setAvatars] = useState([]);
-  const [selectedAvatar, setSelectedAvatar] = useState('');
-  const [username, setUsername] = useState('');
-  const [roomCode, setRoomCode] = useState('');
+  const [selectedAvatar, setSelectedAvatar] = useState(initialAvatar || '');
+  const [username, setUsername] = useState(initialUsername || '');
+  const [roomCode, setRoomCode] = useState(initialRoomCode || '');
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
@@ -165,10 +165,10 @@ export default function JoinScreen() {
             {error && <div className="text-red-400 text-xs font-medium bg-red-500/10 p-2 rounded-lg border border-red-500/20 text-center">{error}</div>}
 
             <div className="flex flex-col gap-2.5 mt-auto pt-3">
-              <button type="submit" className="w-full bg-gradient-to-r from-[#7a5b9b] to-[#5b407a] hover:from-[#8b6cac] hover:to-[#6c4f8a] text-[#f4ecd8] font-medium py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(122,91,155,0.3)] flex items-center justify-center gap-2 border border-[#9b7bcf]/30">
-                Join Game <span className="text-lg leading-none">→</span>
+              <button type="submit" disabled={isLoading} className={`w-full bg-gradient-to-r from-[#7a5b9b] to-[#5b407a] hover:from-[#8b6cac] hover:to-[#6c4f8a] text-[#f4ecd8] font-medium py-3 rounded-xl transition-all shadow-[0_0_20px_rgba(122,91,155,0.3)] flex items-center justify-center gap-2 border border-[#9b7bcf]/30 ${isLoading ? 'opacity-70 cursor-wait' : ''}`}>
+                {isLoading ? 'Entering Room...' : 'Join Game'} <span className="text-lg leading-none">→</span>
               </button>
-              <button type="button" onClick={handleCreateRoom} className="w-full bg-[#120d1d] hover:bg-[#1a1329] border border-[#2d223a] text-[#a397b4] hover:text-[#e2d5b5] font-medium py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+              <button type="button" onClick={handleCreateRoom} disabled={isLoading} className={`w-full bg-[#120d1d] hover:bg-[#1a1329] border border-[#2d223a] text-[#a397b4] hover:text-[#e2d5b5] font-medium py-3 rounded-xl transition-all flex items-center justify-center gap-2 ${isLoading ? 'opacity-70 cursor-wait' : ''}`}>
                 👥 Create Room
               </button>
             </div>

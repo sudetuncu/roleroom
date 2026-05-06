@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import JoinScreen from './JoinScreen';
 
 const ROLES = {
   Detective: { emoji: '🔍', color: '#60a5fa', bg: 'rgba(96,165,250,0.18)', keywords: ['clue','suspect','investigate'] },
@@ -234,6 +235,17 @@ export default function ChatRoom() {
 
   const myRoleData = R(gameState.myRole);
   const myUser = gameState.users.find(u => u.username === username);
+
+  if (!bgReady) {
+    return (
+      <JoinScreen 
+        isLoading={true} 
+        initialUsername={username} 
+        initialAvatar={avatar} 
+        initialRoomCode={queryParams.get('room') || ''} 
+      />
+    );
+  }
 
   return (
     <>
