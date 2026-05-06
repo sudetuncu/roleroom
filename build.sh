@@ -6,8 +6,8 @@ npm install --no-audit --no-fund --loglevel=error
 
 echo "==> Installing client dependencies"
 cd client
-rm -rf node_modules
-npm install --no-audit --no-fund --loglevel=error
+rm -rf node_modules package-lock.json
+npm install --no-audit --no-fund --loglevel=error --include=optional
 
 echo "==> Building client"
 node ./node_modules/vite/bin/vite.js build
