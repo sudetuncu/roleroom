@@ -611,6 +611,17 @@ io.on('connection', (socket) => {
       '';
     const avatar = String(avatarRaw).trim().slice(0, 200).replace(/[<>"']/g, '');
 
+    const rawRoom =
+      (payload && typeof payload.room === 'string' && payload.room) ||
+      socket.handshake.query?.room ||
+      'global';
+    const roomCode = String(rawRoom)
+      .trim()
+      .slice(0, 32)
+      .replace(/[<>"']/g, '') || 'global';
+
+    socket.join(roomCode);
+
     if (!username) {
       socket.emit('error_msg', 'Invalid username.');
       return;
@@ -618,10 +629,11 @@ io.on('connection', (socket) => {
 
     const existing = db.getUserBySocket(socket.id);
     if (existing) {
-      broadcastState();
+      broadcastState(roomCode);
       return;
     }
 
+    const state = getRoomState(roomCode);
     const role = state.currentRoundRoles[Math.floor(Math.random() * state.currentRoundRoles.length)] || db.randomRole();
 
     // One logical player per username: close other tabs, merge duplicate DB rows
