@@ -3,7 +3,7 @@ services:
     name: roleroom
     env: node
     plan: free
-    buildCommand: npm install && cd client && npm install && npx vite build
+    buildCommand: npm install && cd client && npm install --include=dev && npx vite build
     startCommand: node server.js
     envVars:
       - key: NODE_VERSION
