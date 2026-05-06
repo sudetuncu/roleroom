@@ -1,11 +1,9 @@
 /**
  * db.js — SQLite persistence for RoleRoom
- * Uses Node.js built-in `node:sqlite` (Node 22.5+) so no native addons
- * need to match your installed Node version (avoids NODE_MODULE_VERSION errors).
  */
 
 const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+const Database = require('better-sqlite3');
 
 const DB_PATH = path.join(__dirname, 'roleroom.db');
 
@@ -31,9 +29,9 @@ function getXPForNextLevel(level) {
 }
 
 function init() {
-  db = new DatabaseSync(DB_PATH);
+  db = new Database(DB_PATH);
   // WAL improves concurrent read/write behavior for the chat log.
-  db.exec(`PRAGMA journal_mode = WAL;`);
+  db.pragma(`journal_mode = WAL`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
