@@ -37,7 +37,7 @@ export default function ChatRoom() {
   const [questNotif, setQuestNotif] = useState(null);
   const [narratorAvatar, setNarratorAvatar] = useState('/images/narrator.png');
   const [backgroundAssets, setBackgroundAssets] = useState([]);
-  const [isBgLoaded, setIsBgLoaded] = useState(false);
+  const [bgReady, setBgReady] = useState(false);
   const messagesEndRef = useRef(null);
 
   const queryParams = new URLSearchParams(location.search);
@@ -158,14 +158,6 @@ export default function ChatRoom() {
   }, []);
 
   useEffect(() => {
-    if (gameState.myRole && gameState.myRole !== '—') {
-      document.body.className = `rr-page h-screen font-sans text-slate-200 overflow-hidden flex flex-col relative theme-${gameState.myRole.toLowerCase()}`;
-    } else {
-      document.body.className = `rr-page h-screen font-sans text-slate-200 overflow-hidden flex flex-col relative`;
-    }
-  }, [gameState.myRole]);
-
-  useEffect(() => {
     // If assets or role are not ready, don't do anything yet
     if (!Array.isArray(backgroundAssets) || backgroundAssets.length === 0 || !gameState.myRole || gameState.myRole === '—') return;
 
@@ -178,7 +170,7 @@ export default function ChatRoom() {
     };
     const rawIndex = roleIndexes[roleKey];
     if (rawIndex === undefined) {
-      setIsBgLoaded(true); // Fallback
+      setBgReady(true); // Fallback
       return;
     }
     const selected = backgroundAssets[rawIndex % backgroundAssets.length];
@@ -187,23 +179,31 @@ export default function ChatRoom() {
       img.src = selected.proxyUrl;
       img.onload = () => {
         document.body.style.setProperty('--rr-custom-bg-image', `url("${selected.proxyUrl}")`);
-        setIsBgLoaded(true);
+        setBgReady(true);
       };
       img.onerror = () => {
-        setIsBgLoaded(true);
+        setBgReady(true);
       };
     } else {
-      setIsBgLoaded(true);
+      setBgReady(true);
     }
   }, [gameState.myRole, backgroundAssets]);
 
   // Fallback timeout in case image loading hangs or fails silently
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (!isBgLoaded) setIsBgLoaded(true);
+      if (!bgReady) setBgReady(true);
     }, 4000);
     return () => clearTimeout(timer);
-  }, [isBgLoaded]);
+  }, [bgReady]);
+
+  useEffect(() => {
+    if (bgReady && gameState.myRole && gameState.myRole !== '—') {
+      document.body.className = `rr-page h-screen font-sans text-slate-200 overflow-hidden flex flex-col relative theme-${gameState.myRole.toLowerCase()}`;
+    } else {
+      document.body.className = `rr-page h-screen font-sans text-slate-200 overflow-hidden flex flex-col relative`;
+    }
+  }, [gameState.myRole, bgReady]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -237,12 +237,6 @@ export default function ChatRoom() {
 
   return (
     <>
-      {!isBgLoaded && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0d0618] text-purple-300">
-          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <h2 className="font-cinzel text-xl font-bold tracking-widest animate-pulse uppercase">Entering Room...</h2>
-        </div>
-      )}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="atmosphere-layer"></div>
       
