@@ -44,6 +44,7 @@ export default function ChatRoom() {
   const username = (queryParams.get('username') || '').trim();
   const avatar = (queryParams.get('avatar') || '').trim();
   const selectedBgUrl = (queryParams.get('bg') || '').trim();
+  const roomCode = (queryParams.get('room') || 'global').trim();
 
   useEffect(() => {
     if (!username) {
@@ -53,12 +54,12 @@ export default function ChatRoom() {
 
     const apiUrl = import.meta.env.VITE_API_URL || '';
     const newSocket = io(apiUrl || '/', {
-      query: { username, avatar },
+      query: { username, avatar, room: roomCode },
       transports: ['websocket', 'polling']
     });
     
     newSocket.on('connect', () => {
-      newSocket.emit('join', { username, avatar });
+      newSocket.emit('join', { username, avatar, room: roomCode });
     });
 
     newSocket.on('state', (stateData) => {
@@ -269,6 +270,13 @@ export default function ChatRoom() {
           </div>
           <h1 className="font-display text-[1.35rem] sm:text-2xl shimmer-text tracking-wider leading-tight">RoleRoom</h1>
           <span className="text-[8px] sm:text-[9px] tracking-[0.22em] text-purple-300/65 mt-1 font-semibold">LIVE ACTION ROLEPLAY</span>
+          {roomCode && roomCode !== 'global' && (
+            <div className="mt-1.5 pointer-events-auto">
+              <span className="text-[10px] font-mono tracking-widest text-emerald-200 bg-emerald-900/30 px-2.5 py-0.5 rounded-full border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.15)] flex items-center gap-1.5">
+                <span className="text-[8px] text-emerald-400">ROOM:</span> {roomCode}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end max-w-[42%] sm:max-w-none">

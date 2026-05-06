@@ -62,26 +62,32 @@ app.get('*', (req, res) => {
 
 db.init();
 
-/** Server-side round end timestamp (ms). Resets on new game or first connection batch. */
-let roundEndsAt = Date.now() + ROUND_MS;
-
-/** Display round index 1..ROUND_TOTAL (increments when each timed window ends). */
 const ROUND_TOTAL = 10;
-let roundNumber = 1;
-let currentScenario = '';
-let currentRoundRoles = [...db.ROLES];
-let roundMessages = [];
-let roundLifecycleRunning = false;
-
-/** Dynamic Events */
-let dynamicEventActive = false;
-let dynamicEventText = '';
-let dynamicEventEndsAt = 0;
 const DYNAMIC_EVENT_DURATION_MS = 30_000;
 const DYNAMIC_EVENT_CHANCE = 0.25; // 25% chance per 15s tick
 
-/** Secret Quests — map of username -> { quest, completed } */
-let secretQuests = new Map();
+const rooms = new Map();
+
+function getRoomState(roomCode) {
+  if (!rooms.has(roomCode)) {
+    rooms.set(roomCode, {
+      roundEndsAt: Date.now() + ROUND_MS,
+      roundNumber: 1,
+      currentScenario: '',
+      currentRoundRoles: [...db.ROLES],
+      roundMessages: [],
+      roundLifecycleRunning: false,
+      dynamicEventActive: false,
+      dynamicEventText: '',
+      dynamicEventEndsAt: 0,
+      secretQuests: new Map(),
+      votingActive: false,
+      votes: new Map()
+    });
+  }
+  return rooms.get(roomCode);
+}
+
 const SECRET_QUEST_POOL = {
   Detective: [
     'Accuse someone of being suspicious in chat',
@@ -105,12 +111,9 @@ const SECRET_QUEST_POOL = {
   ],
 };
 
-/** Voting state */
-let votingActive = false;
-let votes = new Map(); // voter -> targetUsername
-
-function secondsLeftInRound() {
-  return Math.max(0, Math.ceil((roundEndsAt - Date.now()) / 1000));
+function secondsLeftInRound(roomCode) {
+  const state = getRoomState(roomCode);
+  return Math.max(0, Math.ceil((state.roundEndsAt - Date.now()) / 1000));
 }
 
 /**
@@ -135,8 +138,8 @@ function keywordHintForRole(role) {
 }
 
 /** Build payload of active users for clients (top player = first in sort order from DB). */
-function buildUsersPayload() {
-  return db.getActiveUsersOrderedByScore().map((row) => ({
+function buildUsersPayload(roomCode) {
+  return db.getActiveUsersOrderedByScore(roomCode).map((row) => ({
     id: row.id,
     username: row.username,
     role: row.role,
@@ -184,7 +187,7 @@ function safeJsonParse(raw) {
   }
 }
 
-async function generateScenarioFromAI() {
+async function generateScenarioFromAI(roomCode) {
   if (!openai) return fallbackScenario();
   try {
     const completion = await openai.chat.completions.create({
@@ -211,10 +214,11 @@ async function generateScenarioFromAI() {
   }
 }
 
-function assignRolesForCurrentRound() {
-  const users = db.getActiveUsersOrderedByScore();
+function assignRolesForCurrentRound(roomCode) {
+  const state = getRoomState(roomCode);
+  const users = db.getActiveUsersOrderedByScore(roomCode);
   if (users.length === 0) return;
-  const shuffledRoles = [...currentRoundRoles].sort(() => Math.random() - 0.5);
+  const shuffledRoles = [...state.currentRoundRoles].sort(() => Math.random() - 0.5);
   for (let i = 0; i < users.length; i += 1) {
     const role = shuffledRoles[i % shuffledRoles.length];
     db.setRole(users[i].id, role);
@@ -222,13 +226,14 @@ function assignRolesForCurrentRound() {
 }
 
 /** Assign a secret quest to each active player */
-function assignSecretQuests() {
-  secretQuests.clear();
-  const users = db.getActiveUsersOrderedByScore();
+function assignSecretQuests(roomCode) {
+  const state = getRoomState(roomCode);
+  state.secretQuests.clear();
+  const users = db.getActiveUsersOrderedByScore(roomCode);
   for (const u of users) {
     const pool = SECRET_QUEST_POOL[u.role] || SECRET_QUEST_POOL.Spy;
     const quest = pool[Math.floor(Math.random() * pool.length)];
-    secretQuests.set(u.username, { quest, completed: false });
+    state.secretQuests.set(u.username, { quest, completed: false });
   }
 }
 
@@ -243,7 +248,8 @@ const FALLBACK_EVENTS = [
   '📜 A cryptic note is found pinned to the wall: "Trust no one."',
 ];
 
-async function generateDynamicEvent() {
+async function generateDynamicEvent(roomCode) {
+  const state = getRoomState(roomCode);
   if (!openai) {
     return FALLBACK_EVENTS[Math.floor(Math.random() * FALLBACK_EVENTS.length)];
   }
@@ -253,7 +259,7 @@ async function generateDynamicEvent() {
       temperature: 0.9,
       messages: [
         { role: 'system', content: 'You are a dramatic game narrator. Generate a single short dramatic event (1-2 sentences) that just happened in the game world. Use an emoji at the start. Be creative and surprising.' },
-        { role: 'user', content: `Current scenario: ${currentScenario}. Generate a sudden dramatic event that changes the situation.` },
+        { role: 'user', content: `Current scenario: ${state.currentScenario}. Generate a sudden dramatic event that changes the situation.` },
       ],
     });
     return normalizeScenario(completion.choices?.[0]?.message?.content) || FALLBACK_EVENTS[0];
@@ -263,49 +269,54 @@ async function generateDynamicEvent() {
 }
 
 /** Try to trigger a dynamic event */
-async function maybeTriggerDynamicEvent() {
-  if (dynamicEventActive || io.engine.clientsCount === 0) return;
+async function maybeTriggerDynamicEvent(roomCode) {
+  const state = getRoomState(roomCode);
+  // Check if room has active clients
+  const activeClients = io.sockets.adapter.rooms.get(roomCode)?.size || 0;
+  if (state.dynamicEventActive || activeClients === 0) return;
   if (Math.random() > DYNAMIC_EVENT_CHANCE) return;
   
-  dynamicEventActive = true;
-  dynamicEventText = await generateDynamicEvent();
-  dynamicEventEndsAt = Date.now() + DYNAMIC_EVENT_DURATION_MS;
+  state.dynamicEventActive = true;
+  state.dynamicEventText = await generateDynamicEvent(roomCode);
+  state.dynamicEventEndsAt = Date.now() + DYNAMIC_EVENT_DURATION_MS;
   
-  io.emit('dynamic_event', { 
-    event: dynamicEventText, 
+  io.to(roomCode).emit('dynamic_event', { 
+    event: state.dynamicEventText, 
     durationSeconds: DYNAMIC_EVENT_DURATION_MS / 1000 
   });
-  io.emit('chat', {
+  io.to(roomCode).emit('chat', {
     username: 'Narrator',
     role: 'System',
-    message: `⚡ EVENT: ${dynamicEventText}`,
+    message: `⚡ EVENT: ${state.dynamicEventText}`,
     pointsDelta: 0,
   });
 }
 
 /** Resolve voting results */
-function resolveVotes() {
-  if (votes.size === 0) return null;
+function resolveVotes(roomCode) {
+  const state = getRoomState(roomCode);
+  if (state.votes.size === 0) return null;
   const tally = new Map();
-  for (const target of votes.values()) {
+  for (const target of state.votes.values()) {
     tally.set(target, (tally.get(target) || 0) + 1);
   }
   let maxVotes = 0, eliminated = '';
   for (const [name, count] of tally) {
     if (count > maxVotes) { maxVotes = count; eliminated = name; }
   }
-  votes.clear();
-  votingActive = false;
+  state.votes.clear();
+  state.votingActive = false;
   return { eliminated, voteCount: maxVotes, tally: Object.fromEntries(tally) };
 }
 
-async function evaluateRoundWithAI() {
-  const users = db.getActiveUsersOrderedByScore();
+async function evaluateRoundWithAI(roomCode) {
+  const state = getRoomState(roomCode);
+  const users = db.getActiveUsersOrderedByScore(roomCode);
   if (users.length === 0) return null;
 
   const roleMapLines = users.map((u) => `- ${u.username}: ${u.role}`).join('\n');
-  const messageLines = roundMessages.length
-    ? roundMessages.map((m) => `${m.username} (${m.role}): ${m.message}`).join('\n')
+  const messageLines = state.roundMessages.length
+    ? state.roundMessages.map((m) => `${m.username} (${m.role}): ${m.message}`).join('\n')
     : 'No roleplay messages were sent in this round.';
 
   if (!openai) {
@@ -324,7 +335,7 @@ Each player has a role and must act according to it.
 Choose the player who best played their role.
 
 Scenario:
-${currentScenario}
+${state.currentScenario}
 
 Roles:
 ${roleMapLines}
@@ -389,9 +400,10 @@ Return ONLY valid JSON in this exact format:
   }
 }
 
-function applyRoundEvaluation(result) {
+function applyRoundEvaluation(result, roomCode) {
   if (!result) return;
-  const users = db.getActiveUsersOrderedByScore();
+  const state = getRoomState(roomCode);
+  const users = db.getActiveUsersOrderedByScore(roomCode);
   const byUsername = new Map(users.map((u) => [u.username, u]));
 
   for (const item of result.scores || []) {
@@ -416,7 +428,7 @@ function applyRoundEvaluation(result) {
   }
 
   // Award quest completion bonus
-  for (const [uname, q] of secretQuests) {
+  for (const [uname, q] of state.secretQuests) {
     if (q.completed) {
       const user = byUsername.get(uname);
       if (user) {
@@ -427,82 +439,86 @@ function applyRoundEvaluation(result) {
   }
 }
 
-async function startRound() {
-  currentScenario = await generateScenarioFromAI();
-  currentRoundRoles = [...db.ROLES];
-  assignRolesForCurrentRound();
-  assignSecretQuests();
-  roundMessages = [];
-  roundEndsAt = Date.now() + ROUND_MS;
-  dynamicEventActive = false;
-  dynamicEventText = '';
-  votingActive = false;
-  votes.clear();
+async function startRound(roomCode) {
+  const state = getRoomState(roomCode);
+  state.currentScenario = await generateScenarioFromAI(roomCode);
+  state.currentRoundRoles = [...db.ROLES];
+  assignRolesForCurrentRound(roomCode);
+  assignSecretQuests(roomCode);
+  state.roundMessages = [];
+  state.roundEndsAt = Date.now() + ROUND_MS;
+  state.dynamicEventActive = false;
+  state.dynamicEventText = '';
+  state.votingActive = false;
+  state.votes.clear();
 
-  io.emit('narrator_scenario', {
-    scenario: currentScenario,
-    roundCurrent: roundNumber,
+  io.to(roomCode).emit('narrator_scenario', {
+    scenario: state.currentScenario,
+    roundCurrent: state.roundNumber,
     roundTotal: ROUND_TOTAL,
   });
-  io.emit('chat', {
+  io.to(roomCode).emit('chat', {
     username: 'Narrator',
     role: 'System',
-    message: currentScenario,
+    message: state.currentScenario,
     pointsDelta: 0,
   });
 
-  // Send secret quests to each player
-  for (const sock of io.sockets.sockets.values()) {
-    const me = db.getUserBySocket(sock.id);
-    if (me && secretQuests.has(me.username)) {
-      sock.emit('secret_quest', { quest: secretQuests.get(me.username).quest });
+  // Send secret quests to each player in the room
+  for (const sock of io.sockets.adapter.rooms.get(roomCode) || []) {
+    const socket = io.sockets.sockets.get(sock);
+    if (!socket) continue;
+    const me = db.getUserBySocket(socket.id);
+    if (me && state.secretQuests.has(me.username)) {
+      socket.emit('secret_quest', { quest: state.secretQuests.get(me.username).quest });
     }
   }
 
-  broadcastState();
+  broadcastState(roomCode);
 }
 
-async function finishRoundAndStartNext() {
-  if (roundLifecycleRunning) return;
-  roundLifecycleRunning = true;
+async function finishRoundAndStartNext(roomCode) {
+  const state = getRoomState(roomCode);
+  if (state.roundLifecycleRunning) return;
+  state.roundLifecycleRunning = true;
   try {
     // Start voting phase
-    votingActive = true;
-    io.emit('voting_start', { durationSeconds: 15 });
-    io.emit('chat', { username: 'Narrator', role: 'System', message: '⚖️ VOTING TIME! You have 15 seconds to vote for who you think is the Killer or Spy!', pointsDelta: 0 });
+    state.votingActive = true;
+    io.to(roomCode).emit('voting_start', { durationSeconds: 15 });
+    io.to(roomCode).emit('chat', { username: 'Narrator', role: 'System', message: '⚖️ VOTING TIME! You have 15 seconds to vote for who you think is the Killer or Spy!', pointsDelta: 0 });
     
     // Wait 15 seconds for votes
     await new Promise(r => setTimeout(r, 15000));
     
     // Resolve votes
-    const voteResult = resolveVotes();
+    const voteResult = resolveVotes(roomCode);
     if (voteResult) {
-      io.emit('voting_result', voteResult);
-      io.emit('chat', { username: 'Narrator', role: 'System', message: `⚖️ The village voted! ${voteResult.eliminated} received ${voteResult.voteCount} vote(s).`, pointsDelta: 0 });
+      io.to(roomCode).emit('voting_result', voteResult);
+      io.to(roomCode).emit('chat', { username: 'Narrator', role: 'System', message: `⚖️ The village voted! ${voteResult.eliminated} received ${voteResult.voteCount} vote(s).`, pointsDelta: 0 });
       // Penalize voted player
-      const users = db.getActiveUsersOrderedByScore();
+      const users = db.getActiveUsersOrderedByScore(roomCode);
       const votedUser = users.find(u => u.username === voteResult.eliminated);
       if (votedUser) db.addScore(votedUser.id, -10);
     }
 
-    const result = await evaluateRoundWithAI();
-    applyRoundEvaluation(result);
-    io.emit('round_result', {
+    const result = await evaluateRoundWithAI(roomCode);
+    applyRoundEvaluation(result, roomCode);
+    io.to(roomCode).emit('round_result', {
       winner: result?.winner || '',
       reason: result?.reason || '',
       scores: result?.scores || [],
       winnerBonus: WINNER_BONUS,
     });
-    io.emit('chat', {
+    io.to(roomCode).emit('chat', {
       username: 'Narrator',
       role: 'System',
       message: `Round winner: ${result?.winner || 'N/A'}${result?.reason ? ` — ${result.reason}` : ''}`,
       pointsDelta: 0,
     });
-    roundNumber = roundNumber >= ROUND_TOTAL ? 1 : roundNumber + 1;
-    await startRound();
+    state.roundNumber = state.roundNumber >= ROUND_TOTAL ? 1 : state.roundNumber + 1;
+    await startRound(roomCode);
   } finally {
-    roundLifecycleRunning = false;
+    state.roundLifecycleRunning = false;
   }
 }
 
@@ -517,55 +533,61 @@ function usersPayloadForViewer(usersFull, viewerUsername) {
 /**
  * Emit refreshed leaderboard + optional per-socket "your role" hint.
  */
-function broadcastState() {
-  const usersFull = buildUsersPayload();
+function broadcastState(roomCode) {
+  const state = getRoomState(roomCode);
+  const usersFull = buildUsersPayload(roomCode);
   const topSocketId = usersFull[0]?.socketId || null;
-  for (const sock of io.sockets.sockets.values()) {
-    const me = db.getUserBySocket(sock.id);
+  for (const sock of io.sockets.adapter.rooms.get(roomCode) || []) {
+    const socket = io.sockets.sockets.get(sock);
+    if (!socket) continue;
+    const me = db.getUserBySocket(socket.id);
     const users = usersPayloadForViewer(usersFull, me?.username || null);
-    const myQuest = me ? secretQuests.get(me.username) : null;
+    const myQuest = me ? state.secretQuests.get(me.username) : null;
     const myStats = me ? db.getPlayerStats(me.username) : null;
-    sock.emit('state', {
+    socket.emit('state', {
       users,
       topSocketId,
       myRole: me ? me.role : '—',
       keywordHint: me ? keywordHintForRole(me.role) : '',
-      scenario: currentScenario,
-      roundSecondsLeft: secondsLeftInRound(),
-      roundCurrent: roundNumber,
+      scenario: state.currentScenario,
+      roundSecondsLeft: secondsLeftInRound(roomCode),
+      roundCurrent: state.roundNumber,
       roundTotal: ROUND_TOTAL,
-      roundMessageCount: roundMessages.length,
+      roundMessageCount: state.roundMessages.length,
       roundMessageLimit: ROUND_MESSAGE_LIMIT,
-      dynamicEvent: dynamicEventActive ? dynamicEventText : null,
+      dynamicEvent: state.dynamicEventActive ? state.dynamicEventText : null,
       secretQuest: myQuest ? myQuest.quest : null,
       questCompleted: myQuest ? myQuest.completed : false,
-      votingActive,
+      votingActive: state.votingActive,
       myStats: myStats ? { level: myStats.level, totalXP: myStats.total_xp, gamesPlayed: myStats.games_played, gamesWon: myStats.games_won } : null,
     });
   }
 }
 
-// Dynamic event timer — check every 15 seconds
+// Room-based intervals
 setInterval(() => {
   if (io.engine.clientsCount === 0) return;
-  if (dynamicEventActive && Date.now() >= dynamicEventEndsAt) {
-    dynamicEventActive = false;
-    dynamicEventText = '';
-    io.emit('dynamic_event_end');
+  for (const [roomCode, state] of rooms.entries()) {
+    if (state.dynamicEventActive && Date.now() >= state.dynamicEventEndsAt) {
+      state.dynamicEventActive = false;
+      state.dynamicEventText = '';
+      io.to(roomCode).emit('dynamic_event_end');
+    }
+    maybeTriggerDynamicEvent(roomCode).catch(console.error);
   }
-  maybeTriggerDynamicEvent().catch(console.error);
 }, 15000);
 
-// Timer tick: broadcast state and move to next round when time ends.
 setInterval(() => {
   if (io.engine.clientsCount === 0) return;
-  if (Date.now() >= roundEndsAt) {
-    finishRoundAndStartNext().catch((err) => {
-      console.error('Round lifecycle error:', err?.message || err);
-    });
-    return;
+  for (const [roomCode, state] of rooms.entries()) {
+    if (Date.now() >= state.roundEndsAt) {
+      finishRoundAndStartNext(roomCode).catch((err) => {
+        console.error('Round lifecycle error:', err?.message || err);
+      });
+      continue;
+    }
+    broadcastState(roomCode);
   }
-  broadcastState();
 }, 1000);
 
 io.on('connection', (socket) => {
@@ -600,10 +622,10 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const role = currentRoundRoles[Math.floor(Math.random() * currentRoundRoles.length)] || db.randomRole();
+    const role = state.currentRoundRoles[Math.floor(Math.random() * state.currentRoundRoles.length)] || db.randomRole();
 
     // One logical player per username: close other tabs, merge duplicate DB rows
-    const oldSocketIds = db.getActiveSocketIdsByUsername(username);
+    const oldSocketIds = db.getActiveSocketIdsByUsername(username, roomCode);
     for (const sid of oldSocketIds) {
       if (!sid || sid === socket.id) continue;
       const oldSock = io.sockets.sockets.get(sid);
@@ -615,36 +637,36 @@ io.on('connection', (socket) => {
         oldSock.disconnect(true);
       }
     }
-    db.clearAllSocketsForUsername(username);
-    db.consolidateUsersByUsername(username);
-    const row = db.getUserRowByUsername(username);
+    db.clearAllSocketsForUsername(username, roomCode);
+    db.consolidateUsersByUsername(username, roomCode);
+    const row = db.getUserRowByUsername(username, roomCode);
     if (row) {
       db.attachSocketToUser(row.id, socket.id, avatar, row.role);
     } else {
       try {
-        db.createUser(username, role, socket.id, avatar);
+        db.createUser(username, role, socket.id, avatar, roomCode);
       } catch (err) {
         socket.emit('error_msg', 'Could not join — try again.');
         return;
       }
     }
 
-    if (!currentScenario) {
-      startRound().catch((err) => {
+    if (!state.currentScenario) {
+      startRound(roomCode).catch((err) => {
         console.error('Initial round start failed:', err?.message || err);
-        broadcastState();
+        broadcastState(roomCode);
       });
     } else {
-      broadcastState();
+      broadcastState(roomCode);
       socket.emit('narrator_scenario', {
-        scenario: currentScenario,
-        roundCurrent: roundNumber,
+        scenario: state.currentScenario,
+        roundCurrent: state.roundNumber,
         roundTotal: ROUND_TOTAL,
       });
     }
 
     // Send recent history so new joiners see context
-    const history = db.getRecentMessages(50);
+    const history = db.getRecentMessages(roomCode, 50);
     for (const row of history) {
       socket.emit('chat', {
         username: row.username,
@@ -662,13 +684,18 @@ io.on('connection', (socket) => {
     }
     let message = String(payload?.message || '').trim().slice(0, 500);
     if (!message) return;
+    
+    // Determine user's room code
+    const roomCodeArray = Array.from(socket.rooms);
+    const roomCode = roomCodeArray.find(r => r !== socket.id) || 'global';
+    const state = getRoomState(roomCode);
 
     // Check for whisper command: /w username message
     const whisperMatch = message.match(/^\/w\s+(\S+)\s+(.+)/i);
     if (whisperMatch) {
       const targetName = whisperMatch[1];
       const whisperMsg = whisperMatch[2];
-      const users = db.getActiveUsersOrderedByScore();
+      const users = db.getActiveUsersOrderedByScore(roomCode);
       const target = users.find(u => u.username.toLowerCase() === targetName.toLowerCase());
       if (!target) {
         socket.emit('error_msg', `Player "${targetName}" not found.`);
@@ -693,29 +720,29 @@ io.on('connection', (socket) => {
     const delta = pointsForMessage(me.role, message);
     const newScore = me.score + delta;
     db.setScore(me.id, newScore);
-    db.saveMessage(me.username, me.role, message, delta);
-    roundMessages.push({ username: me.username, role: me.role, message });
+    db.saveMessage(me.username, me.role, message, delta, roomCode);
+    state.roundMessages.push({ username: me.username, role: me.role, message });
 
     // Award small XP for chatting
     db.addXP(me.username, delta > 0 ? 5 : 1);
 
-    io.emit('chat', {
+    io.to(roomCode).emit('chat', {
       username: me.username,
       message,
       pointsDelta: delta,
       avatar: me.avatar || '',
     });
-    broadcastState();
+    broadcastState(roomCode);
 
-    if (roundMessages.length >= ROUND_MESSAGE_LIMIT && !roundLifecycleRunning) {
-      roundEndsAt = Date.now();
-      io.emit('chat', {
+    if (state.roundMessages.length >= ROUND_MESSAGE_LIMIT && !state.roundLifecycleRunning) {
+      state.roundEndsAt = Date.now();
+      io.to(roomCode).emit('chat', {
         username: 'Narrator',
         role: 'System',
         message: `Message limit for this round reached (${ROUND_MESSAGE_LIMIT}). The round is ending!`,
         pointsDelta: 0,
       });
-      finishRoundAndStartNext().catch((err) => {
+      finishRoundAndStartNext(roomCode).catch((err) => {
         console.error('Round lifecycle error (message cap):', err?.message || err);
       });
     }

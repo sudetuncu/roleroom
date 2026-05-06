@@ -72,6 +72,16 @@ function init() {
   } catch (e) {
     // Ignore error if column already exists
   }
+  try {
+    db.exec(`ALTER TABLE users ADD COLUMN room_code TEXT NOT NULL DEFAULT 'global'`);
+  } catch (e) {
+    // Ignore error if column already exists
+  }
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN room_code TEXT NOT NULL DEFAULT 'global'`);
+  } catch (e) {
+    // Ignore error if column already exists
+  }
 }
 
 function randomRole() {
@@ -82,12 +92,12 @@ function randomRole() {
  * Register a connected player. Each socket gets its own DB row
  * so scores and roles stay consistent for that session.
  */
-function createUser(username, role, socketId, avatar = '') {
+function createUser(username, role, socketId, avatar = '', roomCode = 'global') {
   const stmt = db.prepare(`
-    INSERT INTO users (username, role, score, socket_id, avatar)
-    VALUES (?, ?, 0, ?, ?)
+    INSERT INTO users (username, role, score, socket_id, avatar, room_code)
+    VALUES (?, ?, 0, ?, ?, ?)
   `);
-  const info = stmt.run(username, role, socketId, String(avatar).slice(0, 200));
+  const info = stmt.run(username, role, socketId, String(avatar).slice(0, 200), roomCode);
   const rid = info.lastInsertRowid;
   
   // Ensure player_stats row exists
@@ -109,43 +119,44 @@ function addScore(userId, delta) {
 }
 
 /** Active players: rows that currently have a non-null socket_id. */
-function getActiveUsersOrderedByScore() {
+function getActiveUsersOrderedByScore(roomCode = 'global') {
   return db
     .prepare(
       `SELECT id, username, role, score, socket_id, avatar
        FROM users
-       WHERE socket_id IS NOT NULL
+       WHERE socket_id IS NOT NULL AND room_code = ?
        ORDER BY score DESC, username ASC`
     )
-    .all();
+    .all(roomCode);
 }
 
 function disconnectUserBySocket(socketId) {
   db.prepare(`UPDATE users SET socket_id = NULL WHERE socket_id = ?`).run(socketId);
 }
 
-function saveMessage(username, role, message, pointsDelta) {
+function saveMessage(username, role, message, pointsDelta, roomCode = 'global') {
   db.prepare(
-    `INSERT INTO messages (username, role, message, points_delta)
-     VALUES (?, ?, ?, ?)`
-  ).run(username, role, message, pointsDelta);
+    `INSERT INTO messages (username, role, message, points_delta, room_code)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(username, role, message, pointsDelta, roomCode);
 }
 
-function getRecentMessages(limit = 100) {
+function getRecentMessages(roomCode = 'global', limit = 100) {
   const rows = db
     .prepare(
       `SELECT username, role, message, points_delta, created_at
        FROM messages
+       WHERE room_code = ?
        ORDER BY id DESC
        LIMIT ?`
     )
-    .all(limit);
+    .all(roomCode, limit);
   return rows.reverse();
 }
 
 /** Reassign random roles and reset scores for all still-connected users. */
-function resetGameForActiveUsers() {
-  const rows = getActiveUsersOrderedByScore();
+function resetGameForActiveUsers(roomCode = 'global') {
+  const rows = getActiveUsersOrderedByScore(roomCode);
   const update = db.prepare(`UPDATE users SET role = ?, score = 0 WHERE id = ?`);
   for (const row of rows) {
     update.run(randomRole(), row.id);
@@ -213,27 +224,27 @@ function getGlobalLeaderboard(limit = 20) {
 }
 
 /** Socket ids currently bound to this username (other tabs / stale sessions). */
-function getActiveSocketIdsByUsername(username) {
+function getActiveSocketIdsByUsername(username, roomCode = 'global') {
   return db
-    .prepare(`SELECT socket_id FROM users WHERE username = ? AND socket_id IS NOT NULL`)
-    .all(username)
+    .prepare(`SELECT socket_id FROM users WHERE username = ? AND room_code = ? AND socket_id IS NOT NULL`)
+    .all(username, roomCode)
     .map((r) => r.socket_id)
     .filter(Boolean);
 }
 
-function clearAllSocketsForUsername(username) {
-  db.prepare(`UPDATE users SET socket_id = NULL WHERE username = ?`).run(username);
+function clearAllSocketsForUsername(username, roomCode = 'global') {
+  db.prepare(`UPDATE users SET socket_id = NULL WHERE username = ? AND room_code = ?`).run(username, roomCode);
 }
 
 /**
  * Same username may have multiple rows (legacy duplicate joins). Keep the best-scoring row, delete others.
  */
-function consolidateUsersByUsername(username) {
-  const rows = db.prepare(`SELECT id FROM users WHERE username = ? ORDER BY score DESC, id ASC`).all(username);
+function consolidateUsersByUsername(username, roomCode = 'global') {
+  const rows = db.prepare(`SELECT id FROM users WHERE username = ? AND room_code = ? ORDER BY score DESC, id ASC`).all(username, roomCode);
   if (rows.length <= 1) return rows[0]?.id ?? null;
   const keepId = rows[0].id;
-  const del = db.prepare(`DELETE FROM users WHERE username = ? AND id != ?`);
-  del.run(username, keepId);
+  const del = db.prepare(`DELETE FROM users WHERE username = ? AND room_code = ? AND id != ?`);
+  del.run(username, roomCode, keepId);
   return keepId;
 }
 
@@ -247,8 +258,8 @@ function attachSocketToUser(userId, socketId, avatar, role) {
   return userId;
 }
 
-function getUserRowByUsername(username) {
-  return db.prepare(`SELECT * FROM users WHERE username = ? LIMIT 1`).get(username);
+function getUserRowByUsername(username, roomCode = 'global') {
+  return db.prepare(`SELECT * FROM users WHERE username = ? AND room_code = ? LIMIT 1`).get(username, roomCode);
 }
 
 /** Dev / full reset: empty game tables (player_stats optional for true XP wipe). */
